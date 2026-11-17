@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Community Waste Management System</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Segoe UI, Arial, sans-serif; background: #f2f5f3; color: #222; }
+  header { background: #1b6b45; color: #fff; padding: 18px 28px; }
+  header h1 { margin: 0; font-size: 22px; }
+  header p { margin: 4px 0 0; font-size: 13px; opacity: .85; }
+  main { max-width: 1200px; margin: 20px auto; padding: 0 16px; }
+  .card { background: #fff; border-radius: 8px; padding: 18px; margin-bottom: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+  h2 { margin: 0 0 12px; font-size: 17px; color: #1b6b45; }
+  .stats { display: flex; gap: 12px; flex-wrap: wrap; }
+  .stat { background: #e8f3ed; border-radius: 6px; padding: 12px 18px; min-width: 150px; }
+  .stat b { display: block; font-size: 24px; color: #1b6b45; }
+  .tabs button { border: 0; background: #dfe8e3; padding: 9px 14px; margin: 0 4px 8px 0; border-radius: 6px; cursor: pointer; }
+  .tabs button.active { background: #1b6b45; color: #fff; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid #e3e3e3; }
+  th { background: #f6f8f7; }
+  .table-wrap { overflow-x: auto; }
+  form { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+  input, select { padding: 8px; border: 1px solid #bbb; border-radius: 5px; width: 100%; }
+  .btn { background: #1b6b45; color: #fff; border: 0; padding: 9px 14px; border-radius: 5px; cursor: pointer; }
+  .btn.small { padding: 4px 9px; font-size: 12px; }
+  .btn.red { background: #b33a3a; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Community Waste Management System</h1>
+  <p>Garbage collection, issue reporting and pickup tracking</p>
+</header>
+
+<main>
+  <div class="card">
+    <h2>Unresolved issues per neighborhood</h2>
+    <div class="stats" id="stats"></div>
+  </div>
+
+  <div class="card">
+    <h2>Report a problem</h2>
+    <form id="issueForm">
+      <select id="resident" required></select>
+      <select id="issue_type">
+        <option>Missed pickup</option><option>Overflowing bin</option><option>Illegal dumping</option>
+      </select>
+      <select id="priority"><option>High</option><option selected>Medium</option><option>Low</option></select>
+      <input id="description" placeholder="Describe the problem" required>
+      <button class="btn" type="submit">Submit report</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Database records</h2>
+    <div class="tabs" id="tabs"></div>
+    <div class="table-wrap"><table id="table"></table></div>
+  </div>
+</main>
+
+<script>
+const COLS = ['neighborhoods', 'residents', 'trucks', 'pickup_schedules', 'issue_reports'];
+let current = 'issue_reports';
+let residents = [];
+
+const api = (path, opts) => fetch('/api/' + path, opts).then(r => r.json());
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = v => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v)) ? v.slice(0, 10) : v;
+
+async function loadStats() {
+  const rows = await api('reports/unresolved');
+  document.getElementById('stats').innerHTML = rows.length
+    ? rows.map(r => `<div class="stat"><b>${r.unresolved}</b>${esc(r.neighborhood)}</div>`).join('')
+    : '<p>No unresolved issues 🎉</p>';
+}
+
+async function loadResidents() {
+  residents = await api('residents');
+  document.getElementById('resident').innerHTML =
+    '<option value="">-- Select resident --</option>' +
+    residents.map(r => `<option value="${esc(r._id)}">${esc(r.full_name)}</option>`).join('');
+}
+
+function renderTabs() {
+  document.getElementById('tabs').innerHTML = COLS.map(c =>
+    `<button class="${c === current ? 'active' : ''}" onclick="show('${c}')">${c}</button>`).join('');
+}
+
+async function show(col) {
+  current = col;
+  renderTabs();
+  const data = await api(col);
+  const keys = [...new Set(data.flatMap(Object.keys))];
+  let html = '<tr>' + keys.map(k => `<th>${esc(k)}</th>`).join('') + '<th>Actions</th></tr>';
+  html += data.map(row => {
+    const resolve = (col === 'issue_reports' && row.status !== 'Resolved')
+      ? `<button class="btn small" onclick="resolveIssue('${row._id}')">Resolve</button> ` : '';
+    const del = `<button class="btn small red" onclick="removeDoc('${row._id}')">Delete</button>`;
+    return '<tr>' + keys.map(k => `<td>${esc(fmt(row[k]))}</td>`).join('') + `<td>${resolve}${del}</td></tr>`;
+  }).join('');
+  document.getElementById('table').innerHTML = html;
+}
+
+async function resolveIssue(id) {
+  await api('issue_reports/' + id, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: 'Resolved' })
+  });
+  show(current); loadStats();
+}
+
+async function removeDoc(id) {
+  if (!confirm('Delete this record?')) return;
+  await api(current + '/' + id, { method: 'DELETE' });
+  show(current); loadStats();
+}
+
+document.getElementById('issueForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const r = residents.find(x => x._id === document.getElementById('resident').value);
+  if (!r) return;
+  await api('issue_reports', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      resident_id: r._id, neighborhood_id: r.neighborhood_id, street: r.street,
+      issue_type: document.getElementById('issue_type').value,
+      description: document.getElementById('description').value,
+      priority: document.getElementById('priority').value
+    })
+  });
+  e.target.reset();
+  show('issue_reports'); loadStats();
+});
+
+loadStats(); loadResidents(); show(current);
+</script>
+</body>
+</html>
