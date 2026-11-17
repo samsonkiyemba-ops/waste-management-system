@@ -8,7 +8,7 @@ app.use(express.json());
 app.use(express.static('public'));
 
 const COLLECTIONS = ['neighborhoods', 'residents', 'trucks', 'pickup_schedules', 'issue_reports'];
-const client = new MongoClient('mongodb://127.0.0.1:27017');
+const client = new MongoClient(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017');
 let db;
 
 const check = (req, res, next) =>
@@ -62,5 +62,5 @@ app.delete('/api/:col/:id', check, async (req, res) => {
 
 client.connect().then(() => {
   db = client.db('waste_management_db');
-  app.listen(3000, () => console.log('Server running at http://localhost:3000'));
+  app.listen(process.env.PORT || 3000, () => console.log('Server running'));
 });
